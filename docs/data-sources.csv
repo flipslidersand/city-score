@@ -1,0 +1,22 @@
+indicator,source,provider,granularity,update_frequency,type,estimated_missing_rate,notes
+population,e-Stat 社会・人口統計体系,総務省,市区町村,annual,integer,low,基礎人口。国勢調査ベース
+population_age_structure,e-Stat 国勢調査,総務省,市区町村,5-yearly,ratio,low,年齢3区分比率
+net_migration_rate,e-Stat 住民基本台帳人口移動報告,総務省,市区町村,annual,ratio,low,転入超過率。移住者受容度の代理
+job_offer_ratio,厚労省 一般職業紹介状況(有効求人倍率),厚生労働省,都道府県,monthly->annual,ratio,medium,市区町村粒度なし。都道府県値を継承(要検証)
+wage_by_age,厚労省 賃金構造基本統計調査,厚生労働省,都道府県,annual,currency,medium,年齢別賃金カーブ。市区町村按分要検証
+industry_employment_diversity,e-Stat 経済センサス,総務省,市区町村,irregular,index,medium,産業多様性(シャノン指数)算出元
+elderly_employment_rate,e-Stat 国勢調査 労働力状態,総務省,市区町村,5-yearly,ratio,medium,65歳以上就業率。老後就労
+medical_facility_density,e-Stat 医療施設調査,厚生労働省,二次医療圏,annual,ratio,medium,医療圏->市区町村按分(要検証)
+care_facility_capacity,厚労省 介護サービス施設・事業所調査,厚生労働省,都道府県,annual,ratio,medium,老後就労/孤立インフラ
+housing_cost,MLIT 不動産取引価格情報,国土交通省,市区町村,quarterly,currency,high,取引少地域で欠損。人生コスト効率
+land_price,MLIT 地価公示,国土交通省,地点ポイント,annual,currency,medium,空間結合で市区町村集約(要検証)
+consumer_price_regional,e-Stat 小売物価統計調査,総務省,県庁所在市等,annual,index,high,市区町村網羅せず。県値で近似(要検証)
+climate_temp_normal,気象庁 平年値,気象庁,観測所,10-yearly,float,medium,アメダス->市区町村マッピング(要検証)
+climate_precipitation,気象庁 過去の気象データ,気象庁,観測所,annual,float,medium,同上。気候ストレス
+climate_sunshine,気象庁 過去の気象データ,気象庁,観測所,annual,float,medium,日照時間。気候ストレス
+disaster_risk_flood,MLIT 国土数値情報(浸水想定区域),国土交通省,GISポリゴン,irregular,ratio,high,GIS前処理要。気候ストレス(災害)
+transit_access,MLIT 国土数値情報(駅・バス停),国土交通省,GISポイント,irregular,ratio,medium,アクセス性。社会的孤立の代理
+single_household_ratio,e-Stat 国勢調査 世帯,総務省,市区町村,5-yearly,ratio,low,単身世帯比率。社会的孤立
+community_activity,e-Stat 社会生活基本調査,総務省,都道府県,5-yearly,ratio,high,地域活動参加率。市区町村粒度なし(要検証)
+foreign_resident_ratio,e-Stat 住民基本台帳(外国人),総務省,市区町村,annual,ratio,low,外国人比率。移住者受容度の代理(解釈要注意)
+global_bli_topics,OECD Better Life Index,OECD,国/地域,annual,index,low,国際比較レイヤー。国内市区町村とは非連結
