@@ -1,0 +1,84 @@
+# city-score 重み設定サンプル (Phase2, #309)
+# 最終スコア = Σ_k W_k(profile) * indicator_k(area)
+# W_k(profile) = normalize( base_weights[life_stage][k] * occupation_multipliers[occupation][k] )
+# 詳細: docs/indicator-spec.md / docs/indicator-spec-v2.md
+version: 1
+
+# 6 指標の内部 ID（値の向きはすべて「高いほど良い」に統一済み）
+indicators:
+  - career_sustainability
+  - elderly_work_opportunity
+  - life_cost_efficiency
+  - social_connectedness # = 100 - 孤立リスク
+  - climate_comfort # = 気候ストレスの小ささ
+  - migrant_openness
+
+# 正規化パラメータ（全国分布, 要検証）
+normalization:
+  method: percentile_minmax
+  low_percentile: 5
+  high_percentile: 95
+  clip: [0, 100]
+
+# 主観（個人体験）ブレンド係数の既定値（docs/indicator-spec.md 4.3）
+subjective_blend:
+  default_alpha: 0.2
+  max_alpha: 0.5
+
+# ライフステージ別ベース重み（各行 Σ=1, 要検証）
+base_weights:
+  student_newgrad:
+    career_sustainability: 0.30
+    elderly_work_opportunity: 0.00
+    life_cost_efficiency: 0.25
+    social_connectedness: 0.20
+    climate_comfort: 0.10
+    migrant_openness: 0.15
+  family_raising:
+    career_sustainability: 0.20
+    elderly_work_opportunity: 0.05
+    life_cost_efficiency: 0.25
+    social_connectedness: 0.25
+    climate_comfort: 0.15
+    migrant_openness: 0.10
+  single_active:
+    career_sustainability: 0.30
+    elderly_work_opportunity: 0.05
+    life_cost_efficiency: 0.20
+    social_connectedness: 0.20
+    climate_comfort: 0.15
+    migrant_openness: 0.10
+  pre_retirement:
+    career_sustainability: 0.05
+    elderly_work_opportunity: 0.35
+    life_cost_efficiency: 0.25
+    social_connectedness: 0.20
+    climate_comfort: 0.15
+    migrant_openness: 0.00
+  retired:
+    career_sustainability: 0.00
+    elderly_work_opportunity: 0.20
+    life_cost_efficiency: 0.25
+    social_connectedness: 0.30
+    climate_comfort: 0.25
+    migrant_openness: 0.00
+
+# 職種別乗数（ベース重みに掛けて再正規化する。1.0 = 変更なし, 要検証）
+occupation_multipliers:
+  software_engineer: # リモート可能。地理的キャリア依存を下げ気候/コストを上げる
+    career_sustainability: 0.7
+    climate_comfort: 1.3
+    life_cost_efficiency: 1.2
+  civil_servant: # 地域密着
+    career_sustainability: 1.2
+    social_connectedness: 1.1
+  healthcare_worker: # 需要は全国的
+    career_sustainability: 1.1
+    elderly_work_opportunity: 1.2
+  default:
+    career_sustainability: 1.0
+    elderly_work_opportunity: 1.0
+    life_cost_efficiency: 1.0
+    social_connectedness: 1.0
+    climate_comfort: 1.0
+    migrant_openness: 1.0
