@@ -39,8 +39,8 @@ class ScoringEngine:
         life_stage: str,
         occupation: str = "default",
         already_normalized: bool = False,
-        subjective: Mapping[str, float] | None = None,
-        alpha: float | None = None,
+        subjective: Mapping[str, Mapping[str, float]] | None = None,
+        alpha: float | Mapping[str, float] | None = None,
     ) -> pd.DataFrame:
         """地域ごとの総合スコアを算出して降順ランキングで返す。
 
@@ -49,8 +49,8 @@ class ScoringEngine:
             life_stage: ライフステージ（``config.life_stages``）。
             occupation: 職種（``config.occupations``、既定 ``default``）。
             already_normalized: True なら正規化をスキップ（値は 0〜100 前提）。
-            subjective: ``{code: 主観スコア(0-100)}``。指定した地域のみブレンド。
-            alpha: 主観ブレンド係数。省略時は設定の ``default_alpha``。
+            subjective: ``{indicator_k: {code: 主観スコア(0-100)}}``。指標ごと・地域ごとにブレンド。
+            alpha: 主観ブレンド係数。float なら全指標共通、Mapping なら指標ごと。省略時は設定の ``default_alpha``。
 
         Returns:
             識別列 + ``score`` + ``rank`` を持つ DataFrame（score 降順）。
@@ -74,37 +74,50 @@ class ScoringEngine:
             )
 
         weights = self.config.effective_weights(life_stage, occupation)
+
+        # 指標単位での主観ブレンド（正規化後、加重平均前）
+        blended_norm = norm.copy()
+        if subjective:
+            default_alpha = float(
+                self.config.subjective_blend.get("default_alpha", 0.2)
+            )
+            code_col = blended_norm["code"].astype(str) if "code" in blended_norm.columns else None
+
+            for k in inds:
+                if k not in subjective:
+                    continue
+                if code_col is None:
+                    continue
+
+                # この指標の alpha を取得
+                if isinstance(alpha, dict):
+                    alpha_k = alpha.get(k, default_alpha if alpha is None else default_alpha)
+                else:
+                    alpha_k = alpha if alpha is not None else default_alpha
+
+                # subjective[k] = {code: subj_value}
+                subj_map = subjective[k]
+                obj = blended_norm[k].astype("float64")
+
+                for code, subj_val in subj_map.items():
+                    mask = code_col == str(code)
+                    if mask.any():
+                        blended_norm.loc[mask, k] = (1 - alpha_k) * obj[mask] + alpha_k * subj_val
+
         # 欠損指標は 0 寄与ではなく、その地域の他指標だけで加重平均されるよう扱う
-        weighted = pd.Series(0.0, index=norm.index)
-        weight_mass = pd.Series(0.0, index=norm.index)
+        weighted = pd.Series(0.0, index=blended_norm.index)
+        weight_mass = pd.Series(0.0, index=blended_norm.index)
         for k in inds:
-            col = norm[k].astype("float64")
+            col = blended_norm[k].astype("float64")
             present = col.notna()
             weighted = weighted.add(
                 (col.fillna(0.0) * weights[k]).where(present, 0.0), fill_value=0.0
             )
             weight_mass = weight_mass.add(
-                pd.Series(weights[k], index=norm.index).where(present, 0.0),
+                pd.Series(weights[k], index=blended_norm.index).where(present, 0.0),
                 fill_value=0.0,
             )
         score = weighted / weight_mass.replace(0.0, pd.NA)
-
-        # 主観ブレンド
-        if subjective:
-            a = alpha
-            if a is None:
-                a = float(
-                    self.config.subjective_blend.get("default_alpha", 0.2)
-                )
-            code_col = norm["code"] if "code" in norm.columns else None
-            if code_col is not None:
-                subj = code_col.map(lambda c: subjective.get(str(c)))
-                blended = score.copy()
-                mask = subj.notna()
-                blended[mask] = (1 - a) * score[mask] + a * subj[mask].astype(
-                    "float64"
-                )
-                score = blended
 
         out_cols = [c for c in self.key_cols if c in norm.columns]
         result = norm[out_cols].copy()

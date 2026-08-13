@@ -1,0 +1,9 @@
+# city-score UI dependencies for Streamlit Cloud deployment
+# Generated from pyproject.toml [ui] extras
+
+requests>=2.31
+pandas>=2.2
+numpy>=1.26
+pyyaml>=6.0
+streamlit>=1.35
+plotly>=5.22

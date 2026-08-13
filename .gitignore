@@ -22,6 +22,10 @@ data/processed/
 *.sqlite3
 *.db
 
+# Streamlit
+.streamlit/secrets.toml
+*.parquet
+
 # Editor / OS
 .vscode/
 .idea/
