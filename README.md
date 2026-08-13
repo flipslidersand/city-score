@@ -49,10 +49,28 @@ streamlit run src/ui/streamlit_app.py
 2. **個別スコア** — 1都市の指標内訳レーダー
 3. **プロファイル提案** — ライフステージ/職種/主観スコアから最適居住地を提案
 
+## 実データ取得
+
+### 前提条件
+
+- e-Stat API キー（無料取得）→ [SETUP_ESTAT_API.md](SETUP_ESTAT_API.md)
+
+### 実行コマンド
+
+```bash
+# 確認（ドライラン）
+python scripts/fetch_indicators.py --api-key $ESTAT_API_KEY --dry-run --year 2020
+
+# 実行（全国1,741市区町村のデータ取得）
+python scripts/fetch_indicators.py --api-key $ESTAT_API_KEY --year 2020 --output data/indicators_2020.csv
+```
+
+出力: `data/indicators_YYYYMMDD.csv`（全1,741行×9列）
+
 ## テスト
 
 ```bash
-pytest          # 22 tests
+pytest          # 33 tests
 pytest --cov=city_score --cov-report=term-missing
 ```
 
