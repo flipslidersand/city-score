@@ -90,10 +90,13 @@ def test_engine_ranks_descending():
 def test_engine_subjective_blend_moves_score():
     eng = ScoringEngine()
     base = eng.score(_sample_frame(), life_stage="single_active")
+    # 指標単位の subjective: {indicator_k: {code: subjective_value}}
     blended = eng.score(
         _sample_frame(),
         life_stage="single_active",
-        subjective={"01100": 100.0},
+        subjective={
+            "career_sustainability": {"01100": 100.0},  # 01100 のキャリア持続性を100に上げる
+        },
         alpha=0.5,
     )
     a_base = base[base["code"] == "01100"]["score"].iloc[0]

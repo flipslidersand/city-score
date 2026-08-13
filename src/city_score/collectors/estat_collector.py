@@ -60,6 +60,28 @@ STAT_TABLES: list[StatTable] = [
         transform="identity",
     ),
     StatTable(
+        stats_data_id="0003431122",  # 国勢調査 世帯の種類別世帯数（単独世帯）
+        description="国勢調査 単独世帯数（中間指標、比率計算用）",
+        value_key_hint="単独",
+        indicator_col="_single_household_count",
+        transform="identity",
+        cd_cat01="001",  # 「単独世帯」カテゴリのみ指定
+    ),
+    StatTable(
+        stats_data_id="0003431123",  # 国勢調査 世帯数総数
+        description="国勢調査 総世帯数（中間指標、比率計算用）",
+        value_key_hint="世帯",
+        indicator_col="_total_household_count",
+        transform="identity",
+    ),
+    StatTable(
+        stats_data_id="0003555159",  # 住宅・土地統計調査 借家の平均家賃・敷金
+        description="住宅・土地統計調査 借家平均家賃（円/月）",
+        value_key_hint="平均家賃",
+        indicator_col="housing_cost_raw",
+        transform="identity",
+    ),
+    StatTable(
         stats_data_id="0003410378",  # 国勢調査2020 年齢5歳階級・性別就業状態
         description="国勢調査 65歳以上就業率",
         value_key_hint="65歳以上",
@@ -213,11 +235,15 @@ class EstatCollector:
         if table.transform == "identity":
             pass
         elif table.transform == "per1000":
-            # 人口 1000人あたりに変換（population 列が別途必要 → ここでは比率計算を後処理に委ねる）
-            # テーブル単体では割り算不可なので raw のまま保持
-            pass
+            # 人口 1000人あたりに変換（population 列が別途必要）
+            # TODO: C-3 で人口テーブルを fetch_all に統合し、merge して割り算実装
+            if "population" in df.columns and (df["population"] > 0).any():
+                df["_raw"] = df["_raw"] / (df["population"] / 1000.0)
         elif table.transform == "per10k":
-            pass  # 同上
+            # 人口 10000人あたりに変換（population 列が別途必要）
+            # TODO: C-3 で人口テーブルを fetch_all に統合し、merge して割り算実装
+            if "population" in df.columns and (df["population"] > 0).any():
+                df["_raw"] = df["_raw"] / (df["population"] / 10000.0)
         elif table.transform == "shannon":
             # 産業多様性: code × year でグループ化してシャノン指数を計算
             def _shannon_by_group(grp: pd.DataFrame) -> float:
@@ -254,6 +280,13 @@ class EstatCollector:
         result = frames[0]
         for df in frames[1:]:
             result = result.merge(df, on=["code", "year"], how="outer")
+
+        # 単独世帯比率の計算（中間列から最終指標へ）
+        if "_single_household_count" in result.columns and "_total_household_count" in result.columns:
+            total = result["_total_household_count"]
+            single = result["_single_household_count"]
+            result["single_household_ratio"] = (single / total * 100).where(total > 0, None)
+            result = result.drop(columns=["_single_household_count", "_total_household_count"])
 
         return result.sort_values(["code", "year"]).reset_index(drop=True)
 

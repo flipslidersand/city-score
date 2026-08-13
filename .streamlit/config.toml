@@ -1,0 +1,15 @@
+# Streamlit configuration for city-score
+# https://docs.streamlit.io/library/advanced-features/configuration
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[client]
+showErrorDetails = false
+
+[logger]
+level = "info"

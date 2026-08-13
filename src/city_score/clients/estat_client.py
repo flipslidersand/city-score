@@ -68,6 +68,7 @@ class EstatApiClient:
         stub: bool = False,
         request_interval: float = 0.0,
         timeout: float = 30.0,
+        cache_ttl_days: int | None = None,
     ) -> None:
         self.stub = stub
         self.api_key = api_key if api_key is not None else os.environ.get(_ENV_KEY)
@@ -80,6 +81,11 @@ class EstatApiClient:
         self.request_interval = request_interval
         self._session = session or requests.Session()
         self._last_request_ts = 0.0
+
+        # キャッシュ TTL（秒）
+        if cache_ttl_days is None:
+            cache_ttl_days = int(os.environ.get("ESTAT_CACHE_TTL_DAYS", "7"))
+        self.cache_ttl_seconds = cache_ttl_days * 86400
 
         # スタブ応答レジストリ: endpoint -> callable(params) -> dict
         self._stubs: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
@@ -119,11 +125,16 @@ class EstatApiClient:
         if self._cache_conn is None:
             return None
         row = self._cache_conn.execute(
-            "SELECT payload FROM estat_cache WHERE cache_key = ?", (key,)
+            "SELECT payload, created_at FROM estat_cache WHERE cache_key = ?", (key,)
         ).fetchone()
         if row is None:
             return None
-        return json.loads(row[0])
+        payload, created_at = row
+        # TTL チェック
+        age = time.time() - created_at
+        if age > self.cache_ttl_seconds:
+            return None
+        return json.loads(payload)
 
     def _cache_put(self, key: str, endpoint: str, payload: dict[str, Any]) -> None:
         if self._cache_conn is None:
