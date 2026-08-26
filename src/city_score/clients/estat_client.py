@@ -215,7 +215,7 @@ class EstatApiClient:
             resp = self._session.get(
                 self.base_url + endpoint, params=query, timeout=self.timeout
             )
-        except requests.RequestException as exc:  # pragma: no cover - network
+        except requests.RequestException as exc:
             raise EstatApiError(f"e-Stat リクエスト失敗 ({endpoint}): {exc}") from exc
         if resp.status_code != 200:
             raise EstatApiError(
