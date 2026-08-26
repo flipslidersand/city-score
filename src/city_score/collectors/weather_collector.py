@@ -7,7 +7,7 @@
 アーキテクチャ:
 - JmaClient: 気象庁 CSV エクスポートの薄いラッパー
   URL パターン: https://www.data.jma.go.jp/stats/etrn/view/annually_a.php?prec_no=...
-- StationIndex: アメダス地点番号 → 市区町村コード の対応表
+- StationIndex: AMeDAS 地点番号 → 市区町村コード の対応表（全1,741市区町村対応）
 - WeatherCollector: 複数地点をバッチ取得してキャッシュ
 
 実ネットワーク不要のスタブモードあり (stub=True)。
@@ -19,6 +19,8 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
+import math
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -36,6 +38,9 @@ _JMA_ANNUALLY_URL = (
 )
 
 _DEFAULT_CACHE = Path.home() / ".cache" / "city_score" / "weather.db"
+
+# config ディレクトリのデフォルトパス（パッケージルートから相対）
+_CONFIG_DIR = Path(__file__).parent.parent.parent.parent / "config"
 
 # 代表的なアメダス地点 → 市区町村コード マッピング（主要47都市）
 # (prec_no, block_no, municipality_code, prefecture, name)
@@ -90,6 +95,160 @@ STATION_MASTER: list[tuple[str, str, str, str, str]] = [
     ("88", "47827", "46201", "鹿児島県", "鹿児島"),
     ("91", "47936", "47201", "沖縄県", "那覇"),
 ]
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """2点間のハーバーサイン距離 (km) を計算する。"""
+    r = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+class StationIndex:
+    """AMeDAS 地点インデックス — 全市区町村へのカバレッジを提供する (#7).
+
+    config/amedas_stations.json と config/municipality_station_map.json を読み込み、
+    市区町村コードから最近傍の AMeDAS 地点を返す。
+
+    設計:
+    - 都道府県コード（先頭2桁）による高速ルックアップ
+    - municipality_overrides による個別上書き
+    - 座標が提供された場合はハーバーサイン距離で最近傍探索
+    """
+
+    def __init__(
+        self,
+        config_dir: Path | None = None,
+        *,
+        stations_file: str = "amedas_stations.json",
+        map_file: str = "municipality_station_map.json",
+    ) -> None:
+        self._config_dir = Path(config_dir) if config_dir else _CONFIG_DIR
+        self._stations: list[dict] = []
+        self._station_by_id: dict[str, dict] = {}
+        self._prefecture_map: dict[str, str] = {}  # pref_code → station_id
+        self._municipality_overrides: dict[str, str] = {}  # muni_code → station_id
+
+        self._load_stations(stations_file)
+        self._load_map(map_file)
+
+    def _load_stations(self, filename: str) -> None:
+        path = self._config_dir / filename
+        if not path.exists():
+            return
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+        self._stations = data.get("stations", [])
+        self._station_by_id = {s["station_id"]: s for s in self._stations}
+
+    def _load_map(self, filename: str) -> None:
+        path = self._config_dir / filename
+        if not path.exists():
+            return
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+        self._prefecture_map = data.get("prefecture_station_map", {})
+        self._municipality_overrides = data.get("municipality_overrides", {})
+
+    @property
+    def stations(self) -> list[dict]:
+        """ロード済み AMeDAS 地点リスト。"""
+        return list(self._stations)
+
+    def get_station_for_municipality(self, municipality_code: str) -> dict | None:
+        """市区町村コードから AMeDAS 地点情報を返す。
+
+        Args:
+            municipality_code: 5〜6桁の市区町村コード（例: "13101"、"011002"）
+
+        Returns:
+            地点情報辞書 (station_id, name, prefecture, lat, lon, elevation)、
+            該当なしの場合は None。
+        """
+        # 個別上書きを優先
+        sid = self._municipality_overrides.get(municipality_code)
+
+        # 都道府県コード（先頭2桁）でフォールバック
+        if sid is None:
+            pref_code = municipality_code[:2]
+            sid = self._prefecture_map.get(pref_code)
+
+        if sid is None:
+            return None
+
+        return self._station_by_id.get(sid)
+
+    def find_nearest_station(self, lat: float, lon: float) -> dict | None:
+        """指定座標から最近傍の AMeDAS 地点を返す。
+
+        Args:
+            lat: 緯度 (度)
+            lon: 経度 (度)
+
+        Returns:
+            最近傍地点の辞書。地点が登録されていない場合は None。
+        """
+        if not self._stations:
+            return None
+
+        best: dict | None = None
+        best_dist = float("inf")
+        for st in self._stations:
+            d = _haversine_km(lat, lon, st["lat"], st["lon"])
+            if d < best_dist:
+                best_dist = d
+                best = st
+        return best
+
+    def coverage_rate(self, municipality_codes: list[str]) -> float:
+        """指定市区町村リストに対するカバレッジ率を返す。
+
+        Args:
+            municipality_codes: 市区町村コードのリスト（全1,741市区町村 など）
+
+        Returns:
+            0.0〜1.0 のカバレッジ率
+        """
+        if not municipality_codes:
+            return 0.0
+        covered = sum(
+            1 for code in municipality_codes
+            if self.get_station_for_municipality(code) is not None
+        )
+        return covered / len(municipality_codes)
+
+    @staticmethod
+    def compute_missing_rate(results: list[dict]) -> float:
+        """気象データ取得結果の欠損率を計算する。
+
+        Args:
+            results: WeatherRecord や dict のリスト。
+                     各要素に mean_temp, hot_days, heavy_snow_days, sunshine_hours を含む。
+
+        Returns:
+            0.0〜1.0 の欠損率（値が None または NaN の割合）。
+            results が空の場合は 1.0 を返す。
+        """
+        if not results:
+            return 1.0
+
+        indicator_keys = ["mean_temp", "hot_days", "heavy_snow_days", "sunshine_hours"]
+        total_fields = len(results) * len(indicator_keys)
+        missing = 0
+
+        for record in results:
+            for key in indicator_keys:
+                val = record.get(key) if isinstance(record, dict) else getattr(record, key, None)
+                if val is None or (isinstance(val, float) and math.isnan(val)):
+                    missing += 1
+
+        return missing / total_fields if total_fields > 0 else 1.0
 
 
 @dataclass
@@ -216,11 +375,6 @@ class WeatherCollector:
         client: JmaClient インスタンス（省略時は自動生成）
         cache_path: SQLite キャッシュファイル（None でキャッシュ無効）
         stations: 取得対象の地点リスト（省略時は STATION_MASTER 全件）
-
-    コンテキストマネージャとして使うと SQLite 接続が確実に閉じられる::
-
-        with WeatherCollector(...) as wc:
-            df = wc.fetch(years=[2020, 2021])
     """
 
     def __init__(
@@ -233,11 +387,12 @@ class WeatherCollector:
         self._client = client or JmaClient()
         self._stations = stations if stations is not None else STATION_MASTER
         self._cache_path = Path(cache_path) if cache_path else None
-        self._conn: sqlite3.Connection | None = None
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(self._cache_path)
             self._init_cache()
+
+    def close(self) -> None:
+        self._client.close()
 
     def __enter__(self) -> "WeatherCollector":
         return self
@@ -245,15 +400,9 @@ class WeatherCollector:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def close(self) -> None:
-        """SQLite 接続を閉じる。"""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
-
     def _init_cache(self) -> None:
-        assert self._conn is not None
-        self._conn.execute(
+        conn = sqlite3.connect(self._cache_path)
+        conn.execute(
             """CREATE TABLE IF NOT EXISTS weather (
                 code TEXT, year INTEGER,
                 mean_temp REAL, hot_days REAL,
@@ -262,18 +411,21 @@ class WeatherCollector:
                 PRIMARY KEY (code, year)
             )"""
         )
-        self._conn.commit()
+        conn.commit()
+        conn.close()
 
     def _cache_get(self, code: str) -> pd.DataFrame | None:
-        if self._conn is None:
+        if not self._cache_path:
             return None
+        conn = sqlite3.connect(self._cache_path)
         df = pd.read_sql_query(
-            "SELECT * FROM weather WHERE code=?", self._conn, params=(code,)
+            "SELECT * FROM weather WHERE code=?", conn, params=(code,)
         )
+        conn.close()
         return df if not df.empty else None
 
     def _cache_put(self, df: pd.DataFrame, code: str) -> None:
-        if self._conn is None or df.empty:
+        if not self._cache_path or df.empty:
             return
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -282,15 +434,17 @@ class WeatherCollector:
         df["fetched_at"] = now
         cols = ["code", "year", "mean_temp", "hot_days", "heavy_snow_days",
                 "sunshine_hours", "fetched_at"]
+        conn = sqlite3.connect(self._cache_path)
         for _, row in df.iterrows():
-            self._conn.execute(
+            conn.execute(
                 """INSERT OR REPLACE INTO weather
                    (code, year, mean_temp, hot_days, heavy_snow_days,
                     sunshine_hours, fetched_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 tuple(row.get(c) for c in cols),
             )
-        self._conn.commit()
+        conn.commit()
+        conn.close()
 
     def fetch(
         self,
