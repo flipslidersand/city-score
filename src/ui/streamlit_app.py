@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -52,6 +54,15 @@ OCCUPATION_LABELS = {
 
 _INDICATORS = list(INDICATOR_LABELS.keys())
 _DATA_PATH = ROOT / "src" / "city_score" / "data" / "sample_indicators.synthetic.csv"
+
+
+def _get_data_timestamp() -> str:
+    """データファイルのタイムスタンプを取得して表示用に整形."""
+    if _DATA_PATH.exists():
+        mtime = os.path.getmtime(_DATA_PATH)
+        dt = datetime.fromtimestamp(mtime)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return "不明"
 
 
 @st.cache_data
@@ -147,11 +158,17 @@ def page_ranking() -> None:
 def page_individual() -> None:
     st.header("個別スコア")
     df = _load_data()
-    if "name" in df.columns:
-        city_names = df["name"].fillna(df["code"]).tolist()
-        city_codes = df["code"].tolist()
-        selected_name = st.selectbox("市区町村", city_names)
-        selected_code = city_codes[city_names.index(selected_name)]
+    if "name" in df.columns and "code" in df.columns:
+        df_display = df[["code", "name", "prefecture"]].fillna("")
+        df_display["display"] = df_display.apply(
+            lambda r: f"{r['name']}（{r['prefecture']}）" if r['prefecture'] else r['name'],
+            axis=1
+        )
+        display_list = df_display["display"].tolist()
+        code_list = df_display["code"].tolist()
+        selected_display = st.selectbox("市区町村", display_list)
+        selected_idx = display_list.index(selected_display)
+        selected_code = code_list[selected_idx]
     else:
         selected_code = st.text_input("市区町村コード（例: 13101）", value="13101")
 
@@ -283,6 +300,10 @@ def main() -> None:
         "日本全国の市区町村を評価するツールです。\n\n"
         "現在のデータは**合成サンプル**です。実データは `--indicators` で差し替え可能です。"
     )
+
+    st.sidebar.divider()
+    st.sidebar.caption(f"📊 データ更新日時: {_get_data_timestamp()}")
+    st.sidebar.caption("⚠️ 注：現在のデータは検証用の合成データです")
 
     if page == "ランキング":
         page_ranking()

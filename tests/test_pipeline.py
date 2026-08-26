@@ -89,7 +89,8 @@ def test_estat_collector_stub_fetch_table():
         {"@area": "01100", "@time": "2020CY00", "$": "45.2"},
         {"@area": "13101", "@time": "2020CY00", "$": "38.7"},
     ]
-    table = STAT_TABLES[1]  # elderly_employment_rate
+    # elderly_employment_rate を検索
+    table = next(t for t in STAT_TABLES if t.indicator_col == "elderly_employment_rate")
     collector = EstatCollector(stub=True, tables=[table], cache_path=None)
     # EstatApiClient のスタブはエンドポイント名 "getStatsData" で登録する
     collector.register_stub("getStatsData", _stub_estat_response(stub_values))
