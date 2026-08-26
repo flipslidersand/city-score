@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 INDICATOR_COLS = [
@@ -116,8 +117,11 @@ def composite_indicators(merged: pd.DataFrame) -> pd.DataFrame:
         out["elderly_work_opportunity"] = float("nan")
 
     # life_cost_efficiency: housing_cost の逆数（データあれば）or 欠損
+    # housing_cost_raw が負値の場合に除数が 0 以下になるのを防ぐため clip(lower=0) を適用し、
+    # 万一 inf が残った場合も NaN に変換して後段の正規化への伝播を防ぐ (#9)
     if "housing_cost_raw" in merged.columns:
-        out["life_cost_efficiency"] = 1.0 / (merged["housing_cost_raw"] + 1)
+        denom = merged["housing_cost_raw"].clip(lower=0) + 1.0
+        out["life_cost_efficiency"] = (1.0 / denom).replace([np.inf, -np.inf], np.nan)
     else:
         out["life_cost_efficiency"] = float("nan")
 

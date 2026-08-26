@@ -204,3 +204,37 @@ def test_pipeline_empty_inputs():
     pipeline = NormalizePipeline()
     df, missing = pipeline.run()
     assert df.empty
+
+
+# ──── #9 life_cost_efficiency ゼロ除算・inf 伝播回帰テスト ──────────────
+
+def test_life_cost_efficiency_negative_housing_cost_no_error():
+    """housing_cost_raw が負値でも ZeroDivisionError / inf が発生しないこと (#9)."""
+    import numpy as np
+    from city_score.processors.normalize import composite_indicators
+
+    merged = pd.DataFrame({
+        "code": ["01100", "13101", "47201"],
+        "year": [2020, 2020, 2020],
+        "housing_cost_raw": [-1.0, -0.5, 0.0],  # 除数が 0 以下になるケース
+    })
+    out = composite_indicators(merged)
+    lce = out["life_cost_efficiency"]
+
+    # inf / -inf は NaN に変換されていること
+    assert not np.any(np.isinf(lce.dropna())), "inf が残っている"
+    # 正常値は非 NaN であること（housing_cost_raw=0.0 → denom=1.0 → 1.0/1.0=1.0）
+    assert not lce.isna().all(), "全て NaN になっている"
+
+
+def test_life_cost_efficiency_positive_housing_cost():
+    """housing_cost_raw が正値のとき life_cost_efficiency が正しい逆数になること (#9)."""
+    from city_score.processors.normalize import composite_indicators
+
+    merged = pd.DataFrame({
+        "code": ["13101"],
+        "year": [2020],
+        "housing_cost_raw": [4.0],  # denom=5.0 → 1/5=0.2
+    })
+    out = composite_indicators(merged)
+    assert abs(out["life_cost_efficiency"].iloc[0] - 0.2) < 1e-9
