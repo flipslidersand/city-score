@@ -160,6 +160,10 @@ class EstatCollector:
         """テスト用スタブを EstatApiClient に登録する。"""
         self._client.register_stub(endpoint, response)
 
+    # ページサイズ: e-Stat API の 1 リクエストあたり最大 10 万件だが、
+    # メモリ・レート配慮のため 10,000 件ずつ取得する。
+    _PAGE_SIZE = 10_000
+
     # ----- 取得 -----
 
     def fetch_table(
@@ -171,9 +175,15 @@ class EstatCollector:
     ) -> pd.DataFrame:
         """1テーブルを取得して market_code × 指標値の DataFrame を返す。
 
+        ページネーション対応: e-Stat API は 1 リクエストあたり最大 10 万件。
+        レスポンスの TOTAL_NUMBER / TO_NUMBER を監視し、全件取得するまで
+        startPosition を進めてループする。
+
         Returns:
             columns: code (str), year (int), <indicator_col> (float)
         """
+        import warnings
+
         extra: dict[str, Any] = {}
         if cd_area:
             extra["cdArea"] = cd_area if isinstance(cd_area, str) else ",".join(cd_area)
@@ -182,21 +192,51 @@ class EstatCollector:
         if table.cd_cat01:
             extra["cdCat01"] = table.cd_cat01
 
-        try:
-            resp = self._client.get_data(
-                table.stats_data_id,
-                meta_get_flg="N",
-                cnt_get_flg="N",
-                **extra,
-            )
-        except Exception as exc:  # noqa: BLE001
-            import warnings
-            warnings.warn(
-                f"e-Stat fetch failed [{table.stats_data_id}]: {exc}", stacklevel=2
-            )
+        all_frames: list[pd.DataFrame] = []
+        start_position = 1
+
+        while True:
+            try:
+                resp = self._client.get_data(
+                    table.stats_data_id,
+                    meta_get_flg="N",
+                    cnt_get_flg="N",
+                    start_position=start_position,
+                    limit=self._PAGE_SIZE,
+                    **extra,
+                )
+            except Exception as exc:  # noqa: BLE001
+                warnings.warn(
+                    f"e-Stat fetch failed [{table.stats_data_id}]: {exc}", stacklevel=2
+                )
+                if not all_frames:
+                    return pd.DataFrame(columns=["code", "year", table.indicator_col])
+                break
+
+            page_df = self._parse_response(resp, table)
+            all_frames.append(page_df)
+
+            # ページネーション終了判定: TOTAL_NUMBER と TO_NUMBER を比較
+            try:
+                table_inf = (
+                    resp.get("GET_STATS_DATA", {})
+                    .get("STATISTICAL_DATA", {})
+                    .get("TABLE_INF", {})
+                )
+                total_number = int(table_inf.get("TOTAL_NUMBER", 0))
+                to_number = int(table_inf.get("TO_NUMBER", 0))
+            except (TypeError, ValueError):
+                break  # パース不能な場合はページング終了
+
+            if total_number == 0 or to_number >= total_number:
+                break
+
+            start_position = to_number + 1
+
+        if not all_frames:
             return pd.DataFrame(columns=["code", "year", table.indicator_col])
 
-        return self._parse_response(resp, table)
+        return pd.concat(all_frames, ignore_index=True)
 
     def _parse_response(self, resp: dict[str, Any], table: StatTable) -> pd.DataFrame:
         """e-Stat API レスポンスを code × year × 指標値 DataFrame に変換する。"""
