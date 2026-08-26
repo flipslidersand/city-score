@@ -275,3 +275,31 @@ def test_life_cost_efficiency_positive_housing_cost():
     })
     out = composite_indicators(merged)
     assert abs(out["life_cost_efficiency"].iloc[0] - 0.2) < 1e-9
+
+
+# ──── #12 e-Stat 年度形式 coerce → dropna 脱落回帰テスト ─────────────
+
+def test_pipeline_estat_cy_year_format_not_dropped():
+    """e-Stat 年度形式 '2020CY00' を含む estat_df でも都市が dropna で脱落しないこと (#12)."""
+    estat_df = pd.DataFrame({
+        "code": ["01100", "13101"],
+        "year": ["2020CY00", "2021CY00"],  # e-Stat 実際の年度形式
+        "elderly_employment_rate": [25.3, 18.7],
+    })
+    pipeline = NormalizePipeline()
+    df, missing = pipeline.run(estat_df=estat_df)
+    assert len(df) == 2, f"都市が dropna で脱落した: {len(df)} 行しかない"
+    assert set(df["year"]) == {2020, 2021}
+
+
+def test_pipeline_estat_mixed_year_format():
+    """整数年度と文字列年度が混在しても両行が保持されること (#12)."""
+    estat_df = pd.DataFrame({
+        "code": ["01100", "13101", "47201"],
+        "year": [2020, "2021CY00", "2022"],
+        "elderly_employment_rate": [25.3, 18.7, 30.0],
+    })
+    pipeline = NormalizePipeline()
+    df, missing = pipeline.run(estat_df=estat_df)
+    assert len(df) == 3, f"行が脱落した: {len(df)} 行"
+    assert set(df["year"]) == {2020, 2021, 2022}

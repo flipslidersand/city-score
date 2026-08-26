@@ -168,11 +168,9 @@ def save_sqlite(df: pd.DataFrame, path: str | Path, table: str = "indicators") -
     """DataFrame を SQLite テーブルとして保存する。"""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p)
-    df.to_sql(table, conn, if_exists="replace", index=False)
-    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_code_year ON {table} (code, year)")
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(p) as conn:
+        df.to_sql(table, conn, if_exists="replace", index=False)
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_code_year ON {table} (code, year)")
 
 
 class NormalizePipeline:
@@ -227,6 +225,12 @@ class NormalizePipeline:
             merged = merged.merge(df, on=["code", "year"], how="outer")
 
         merged["code"] = merged["code"].astype(str).str.zfill(5)
+        # e-Stat の年度形式 ('2020CY00' 等) から4桁数字を抽出してから数値変換する (#12)
+        merged["year"] = (
+            merged["year"]
+            .astype(str)
+            .str.extract(r"(\d{4})", expand=False)
+        )
         merged["year"] = pd.to_numeric(merged["year"], errors="coerce").astype("Int64")
         merged = merged.dropna(subset=["code", "year"])
 
