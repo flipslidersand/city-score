@@ -232,6 +232,15 @@ class WeatherCollector:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_cache()
 
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "WeatherCollector":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
     def _init_cache(self) -> None:
         conn = sqlite3.connect(self._cache_path)
         conn.execute(
