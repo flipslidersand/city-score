@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -68,9 +67,6 @@ def _get_data_timestamp() -> str:
 
 @st.cache_data
 def _load_data() -> pd.DataFrame:
-    if not _DATA_PATH.exists():
-        st.error(f"データファイルが見つかりません: {_DATA_PATH}\n\n`scripts/` を参照してサンプルデータを生成してください。")
-        st.stop()
     df = pd.read_csv(_DATA_PATH, dtype={"code": str})
     muni_path = ROOT / "src" / "city_score" / "data" / "municipalities_sample.csv"
     if muni_path.exists():
@@ -135,8 +131,8 @@ def page_ranking() -> None:
     result = engine.score(df, life_stage=life_stage, occupation=occupation)
     top = result.head(top_n).copy()
 
-    # スコア列のみ表示（列が存在しない場合はスキップ）
-    display_cols = [c for c in ["rank", "name", "prefecture", "score"] if c in top.columns]
+    # スコア列のみ表示
+    display_cols = ["rank", "name", "prefecture", "score"]
     st.dataframe(
         top[display_cols],
         use_container_width=True,
@@ -244,10 +240,7 @@ def page_recommend() -> None:
 
     subjective: dict[str, float] = {}
     if subj_code.strip():
-        if not re.fullmatch(r"\d{5}", subj_code.strip()):
-            st.warning("市区町村コードは5桁の数字で入力してください（例: 13101）")
-        else:
-            subjective[subj_code.strip()] = float(subj_score_val)
+        subjective[subj_code.strip()] = float(subj_score_val)
 
     df = _load_data()
     engine = _engine()
@@ -261,9 +254,8 @@ def page_recommend() -> None:
     top10 = result.head(10)
 
     st.subheader("あなたにおすすめの居住地 Top 10")
-    rec_display_cols = [c for c in ["rank", "name", "prefecture", "score"] if c in top10.columns]
     st.dataframe(
-        top10[rec_display_cols],
+        top10[["rank", "name", "prefecture", "score"]],
         use_container_width=True,
         hide_index=True,
         column_config={"score": st.column_config.NumberColumn("スコア", format="%.1f")},

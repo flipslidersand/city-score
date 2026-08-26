@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
+import traceback
 from pathlib import Path
 
 import pandas as pd
@@ -61,8 +63,13 @@ def _validate_profile_args(
         )
 
 
-def _load_indicators(path: str | Path | None) -> pd.DataFrame:
+def _load_indicators(path: str | Path | None, parser: argparse.ArgumentParser | None = None) -> pd.DataFrame:
     p = Path(path) if path else DEFAULT_INDICATORS
+    if not p.exists():
+        msg = f"指標ファイルが見つかりません: {p}"
+        if parser is not None:
+            parser.error(msg)
+        raise FileNotFoundError(msg)
     df = pd.read_csv(p, dtype={"code": str})
     if "name" not in df.columns or "prefecture" not in df.columns:
         muni = load_municipalities()[["code", "name", "prefecture"]]
@@ -136,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="city-score", description="居住地スコアリング")
     p.add_argument("--config", default=None, help="重み設定 YAML")
     p.add_argument("--indicators", default=None, help="指標データ CSV")
+    p.add_argument("--verbose", "-v", action="store_true", help="エラー時にスタックトレースを表示する")
     sub = p.add_subparsers(dest="command", required=True)
 
     r = sub.add_parser("ranking", help="ランキング出力")
@@ -162,7 +170,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_profile_args(parser, args)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, KeyError, ValueError, pd.errors.ParserError) as e:
+        sys.stderr.write(f"エラー: {e}\n")
+        if getattr(args, "verbose", False):
+            traceback.print_exc()
+        return 2
 
 
 if __name__ == "__main__":  # pragma: no cover

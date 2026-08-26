@@ -20,11 +20,18 @@ DEFAULT_CONFIG = (
     Path(__file__).resolve().parents[3] / "config" / "weights.sample.yaml"
 )
 
+_REQUIRED_KEYS = ("indicators", "base_weights", "occupation_multipliers")
+
 
 class WeightsConfig:
     """重み設定のラッパ。"""
 
     def __init__(self, data: dict[str, Any]):
+        missing = [k for k in _REQUIRED_KEYS if k not in data]
+        if missing:
+            raise ValueError(
+                f"重み設定に必須キーが不足しています: {', '.join(missing)}"
+            )
         self.data = data
         self.indicators: list[str] = list(data["indicators"])
         self.base_weights: dict[str, dict[str, float]] = data["base_weights"]
@@ -104,6 +111,8 @@ class WeightsConfig:
 def load_weights_config(path: str | Path | None = None) -> WeightsConfig:
     """YAML から重み設定を読み込む。``path`` 省略時は同梱サンプルを使う。"""
     p = Path(path) if path else DEFAULT_CONFIG
+    if not p.exists():
+        raise FileNotFoundError(f"設定ファイルが見つかりません: {p}")
     with open(p, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     return WeightsConfig(data)
