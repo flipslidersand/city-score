@@ -198,3 +198,54 @@ def test_valid_config_loads_without_error():
         "climate_comfort",
         "migrant_openness",
     }
+
+
+# --- #16 alpha validation & weight_mass=0 rank fix --------------------
+def test_engine_alpha_out_of_range_raises():
+    """alpha > 1 は ValueError を送出する（fix #16）。"""
+    eng = ScoringEngine()
+    with pytest.raises(ValueError, match="alpha"):
+        eng.score(_sample_frame(), life_stage="single_active", alpha=1.5)
+
+
+def test_engine_alpha_negative_raises():
+    """alpha < 0 は ValueError を送出する（fix #16）。"""
+    eng = ScoringEngine()
+    with pytest.raises(ValueError, match="alpha"):
+        eng.score(_sample_frame(), life_stage="single_active", alpha=-0.1)
+
+
+def test_engine_alpha_clamped_to_max_alpha():
+    """alpha が max_alpha（0.5）を超える場合は 0.5 にクランプされる（fix #16）。"""
+    eng = ScoringEngine()
+    # max_alpha=0.5 なので alpha=0.5 と同じ結果になるはず
+    res_clamped = eng.score(
+        _sample_frame(),
+        life_stage="single_active",
+        subjective={"career_sustainability": {"01100": 100.0}},
+        alpha=0.5,
+    )
+    # alpha=0.5 で直接渡した場合と比較（クランプ後と同一の入力値なので同一結果）
+    res_direct = eng.score(
+        _sample_frame(),
+        life_stage="single_active",
+        subjective={"career_sustainability": {"01100": 100.0}},
+        alpha=0.5,
+    )
+    pd.testing.assert_frame_equal(res_clamped, res_direct)
+
+
+def test_engine_all_nan_indicators_rank_is_nan():
+    """全指標が欠損の行は rank が NaN になる（fix #16）。"""
+    df = _sample_frame().copy()
+    # 3行目の全指標を NaN にする
+    for k in INDICATORS:
+        df.loc[2, k] = None
+    eng = ScoringEngine()
+    res = eng.score(df, life_stage="single_active", already_normalized=True)
+    nan_rows = res[res["score"].isna()]
+    assert len(nan_rows) == 1
+    assert pd.isna(nan_rows["rank"].iloc[0])
+    # NaN 以外の行は連番 1, 2 になっている
+    valid_rows = res[res["score"].notna()]
+    assert list(valid_rows["rank"]) == [1, 2]
