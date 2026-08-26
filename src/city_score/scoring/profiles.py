@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,42 @@ class WeightsConfig:
         ]
         self.normalization: dict[str, Any] = data.get("normalization", {})
         self.subjective_blend: dict[str, Any] = data.get("subjective_blend", {})
+
+        self._validate()
+
+    def _validate(self) -> None:
+        """設定の整合性を検証する。
+
+        * ``base_weights`` の各ライフステージが ``indicators`` と完全一致しない場合は
+          :exc:`ValueError` を送出する（書き漏れ/誤字をフェイルファストで検知）。
+        * ``occupation_multipliers`` の各職種に ``indicators`` に含まれないキーが
+          存在する場合は :exc:`warnings.warn` で通知する。
+        """
+        indicator_set = set(self.indicators)
+
+        for stage, weights in self.base_weights.items():
+            weight_keys = set(weights.keys())
+            missing = indicator_set - weight_keys
+            extra = weight_keys - indicator_set
+            if missing or extra:
+                parts: list[str] = []
+                if missing:
+                    parts.append(f"missing={sorted(missing)}")
+                if extra:
+                    parts.append(f"extra={sorted(extra)}")
+                raise ValueError(
+                    f"base_weights[{stage!r}] does not match indicators — "
+                    + ", ".join(parts)
+                )
+
+        for occupation, mult in self.occupation_multipliers.items():
+            unknown = set(mult.keys()) - indicator_set
+            if unknown:
+                warnings.warn(
+                    f"occupation_multipliers[{occupation!r}] contains keys not in "
+                    f"indicators: {sorted(unknown)}",
+                    stacklevel=2,
+                )
 
     @property
     def life_stages(self) -> list[str]:
