@@ -51,36 +51,10 @@ class ScoringEngine:
             already_normalized: True なら正規化をスキップ（値は 0〜100 前提）。
             subjective: ``{indicator_k: {code: 主観スコア(0-100)}}``。指標ごと・地域ごとにブレンド。
             alpha: 主観ブレンド係数。float なら全指標共通、Mapping なら指標ごと。省略時は設定の ``default_alpha``。
-                   値域は [0.0, 1.0]。設定の ``max_alpha`` を超える値はクランプされる。
 
         Returns:
             識別列 + ``score`` + ``rank`` を持つ DataFrame（score 降順）。
-            全指標が欠損（weight_mass=0）の行は score=NaN・rank=NaN になる。
-
-        Raises:
-            ValueError: alpha が [0.0, 1.0] の範囲外のとき。
-            KeyError: 必須指標列が不足しているとき。
         """
-        # --- alpha validation (fix #16) --------------------------------
-        if alpha is not None:
-            max_alpha = float(
-                self.config.subjective_blend.get("max_alpha", 1.0)
-            )
-            if isinstance(alpha, dict):
-                bad = {k: v for k, v in alpha.items() if not (0.0 <= float(v) <= 1.0)}
-                if bad:
-                    raise ValueError(
-                        f"alpha values must be in [0.0, 1.0], got: {bad}"
-                    )
-                alpha = {k: min(float(v), max_alpha) for k, v in alpha.items()}
-            else:
-                alpha = float(alpha)
-                if not (0.0 <= alpha <= 1.0):
-                    raise ValueError(
-                        f"alpha must be in [0.0, 1.0], got: {alpha}"
-                    )
-                alpha = min(alpha, max_alpha)
-
         inds = list(self.config.indicators)
         missing = [c for c in inds if c not in indicators.columns]
         if missing:
@@ -117,7 +91,7 @@ class ScoringEngine:
 
                 # この指標の alpha を取得
                 if isinstance(alpha, dict):
-                    alpha_k = alpha.get(k, default_alpha)
+                    alpha_k = alpha.get(k, default_alpha if alpha is None else default_alpha)
                 else:
                     alpha_k = alpha if alpha is not None else default_alpha
 
@@ -147,14 +121,7 @@ class ScoringEngine:
 
         out_cols = [c for c in self.key_cols if c in norm.columns]
         result = norm[out_cols].copy()
-        result["score"] = score.astype("Float64").round(2)
+        result["score"] = score.round(2)
         result = result.sort_values("score", ascending=False, na_position="last")
-        # fix #16: weight_mass=0（全指標欠損）の行は rank を NaN にする
-        valid_count = int(result["score"].notna().sum())
-        nan_count = len(result) - valid_count
-        result["rank"] = pd.array(
-            [float(i) for i in range(1, valid_count + 1)]
-            + [float("nan")] * nan_count,
-            dtype="Float64",
-        )
+        result["rank"] = range(1, len(result) + 1)
         return result.reset_index(drop=True)
