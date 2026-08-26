@@ -70,6 +70,43 @@ def test_weather_collector_cache(tmp_path):
     assert len(df1) == len(df2)
 
 
+def test_weather_collector_cache_two_stations_preserved(tmp_path):
+    """2地点書き込み後、両地点のキャッシュが残存することを確認 (Issue #10)."""
+    client = JmaClient(stub=True)
+    st0 = STATION_MASTER[0]  # 1地点目
+    st1 = STATION_MASTER[1]  # 2地点目
+
+    prec0, block0, code0 = st0[:3]
+    prec1, block1, code1 = st1[:3]
+    client.register_stub(prec0, block0, _stub_weather_df())
+    client.register_stub(prec1, block1, _stub_weather_df())
+
+    cache = tmp_path / "weather.db"
+    with WeatherCollector(
+        client=client,
+        cache_path=cache,
+        stations=[st0, st1],
+    ) as collector:
+        df = collector.fetch(years=[2020, 2021])
+
+    # 両地点 2年分 = 4行
+    assert len(df) == 4, f"expected 4 rows, got {len(df)}"
+    assert code0 in df["code"].values, f"code0={code0} missing from result"
+    assert code1 in df["code"].values, f"code1={code1} missing from result"
+
+    # キャッシュを別コレクタで開き直して確認
+    with WeatherCollector(
+        client=JmaClient(stub=True),
+        cache_path=cache,
+        stations=[st0, st1],
+    ) as collector2:
+        cached_df = collector2.fetch(years=[2020, 2021])
+
+    assert code0 in cached_df["code"].values, "code0 lost from cache after two-station write"
+    assert code1 in cached_df["code"].values, "code1 lost from cache after two-station write"
+    assert len(cached_df) == 4, f"expected 4 cached rows, got {len(cached_df)}"
+
+
 # ──── #314 EstatCollector ──────────────────────────────────────────────
 
 def _stub_estat_response(values: list[dict]) -> dict:

@@ -216,6 +216,11 @@ class WeatherCollector:
         client: JmaClient インスタンス（省略時は自動生成）
         cache_path: SQLite キャッシュファイル（None でキャッシュ無効）
         stations: 取得対象の地点リスト（省略時は STATION_MASTER 全件）
+
+    コンテキストマネージャとして使うと SQLite 接続が確実に閉じられる::
+
+        with WeatherCollector(...) as wc:
+            df = wc.fetch(years=[2020, 2021])
     """
 
     def __init__(
@@ -228,13 +233,27 @@ class WeatherCollector:
         self._client = client or JmaClient()
         self._stations = stations if stations is not None else STATION_MASTER
         self._cache_path = Path(cache_path) if cache_path else None
+        self._conn: sqlite3.Connection | None = None
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(self._cache_path)
             self._init_cache()
 
+    def __enter__(self) -> "WeatherCollector":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """SQLite 接続を閉じる。"""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
     def _init_cache(self) -> None:
-        conn = sqlite3.connect(self._cache_path)
-        conn.execute(
+        assert self._conn is not None
+        self._conn.execute(
             """CREATE TABLE IF NOT EXISTS weather (
                 code TEXT, year INTEGER,
                 mean_temp REAL, hot_days REAL,
@@ -243,32 +262,35 @@ class WeatherCollector:
                 PRIMARY KEY (code, year)
             )"""
         )
-        conn.commit()
-        conn.close()
+        self._conn.commit()
 
     def _cache_get(self, code: str) -> pd.DataFrame | None:
-        if not self._cache_path:
+        if self._conn is None:
             return None
-        conn = sqlite3.connect(self._cache_path)
         df = pd.read_sql_query(
-            "SELECT * FROM weather WHERE code=?", conn, params=(code,)
+            "SELECT * FROM weather WHERE code=?", self._conn, params=(code,)
         )
-        conn.close()
         return df if not df.empty else None
 
     def _cache_put(self, df: pd.DataFrame, code: str) -> None:
-        if not self._cache_path or df.empty:
+        if self._conn is None or df.empty:
             return
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         df = df.copy()
         df["code"] = code
         df["fetched_at"] = now
-        conn = sqlite3.connect(self._cache_path)
-        df.to_sql("weather", conn, if_exists="replace", index=False,
-                  method="multi")
-        conn.commit()
-        conn.close()
+        cols = ["code", "year", "mean_temp", "hot_days", "heavy_snow_days",
+                "sunshine_hours", "fetched_at"]
+        for _, row in df.iterrows():
+            self._conn.execute(
+                """INSERT OR REPLACE INTO weather
+                   (code, year, mean_temp, hot_days, heavy_snow_days,
+                    sunshine_hours, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                tuple(row.get(c) for c in cols),
+            )
+        self._conn.commit()
 
     def fetch(
         self,
