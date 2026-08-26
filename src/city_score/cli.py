@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -23,6 +24,41 @@ from .scoring.profiles import load_weights_config
 DEFAULT_INDICATORS = (
     Path(__file__).resolve().parent / "data" / "sample_indicators.synthetic.csv"
 )
+
+_CODE_RE = re.compile(r"^\d{5}$")
+
+
+def _validate_code(value: str) -> str:
+    """argparse type= validator: 5 桁数字のみ許可。"""
+    if not _CODE_RE.match(value):
+        raise argparse.ArgumentTypeError(
+            f"--code は 5 桁の数字で指定してください（例: 13101）。受け取った値: {value!r}"
+        )
+    return value
+
+
+def _validate_profile_args(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """--life-stage / --occupation を設定ファイルの有効値で検証する。
+
+    argparse の choices= は --config 解析前に評価されるため、
+    パース完了後にここで検証する。
+    """
+    cfg = load_weights_config(args.config)
+    life_stage = getattr(args, "life_stage", None)
+    occupation = getattr(args, "occupation", None)
+
+    if life_stage is not None and life_stage not in cfg.life_stages:
+        parser.error(
+            f"--life-stage の値が不正です: {life_stage!r}\n"
+            f"有効な値: {', '.join(cfg.life_stages)}"
+        )
+    if occupation is not None and occupation not in cfg.occupations:
+        parser.error(
+            f"--occupation の値が不正です: {occupation!r}\n"
+            f"有効な値: {', '.join(cfg.occupations)}"
+        )
 
 
 def _load_indicators(path: str | Path | None) -> pd.DataFrame:
@@ -110,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.set_defaults(func=cmd_ranking)
 
     s = sub.add_parser("score", help="単一地域スコア")
-    s.add_argument("--code", required=True)
+    s.add_argument("--code", required=True, type=_validate_code)
     s.add_argument("--life-stage", required=True)
     s.add_argument("--occupation", default="default")
     s.set_defaults(func=cmd_score)
@@ -125,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _validate_profile_args(parser, args)
     return args.func(args)
 
 
