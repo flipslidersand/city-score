@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,8 @@ class EstatCollector:
             stub=stub,
         )
         self._tables = tables if tables is not None else STAT_TABLES
+        # Ensure close() is called even when context manager is not used (#17)
+        self._finalizer = weakref.finalize(self, self._client.close)
 
     # ----- スタブ登録 -----
 
@@ -235,15 +238,25 @@ class EstatCollector:
         if table.transform == "identity":
             pass
         elif table.transform == "per1000":
-            # 人口 1000人あたりに変換（population 列が別途必要）
-            # TODO: C-3 で人口テーブルを fetch_all に統合し、merge して割り算実装
-            if "population" in df.columns and (df["population"] > 0).any():
-                df["_raw"] = df["_raw"] / (df["population"] / 1000.0)
+            # 人口 1000人あたりに変換（population 列が必要）
+            if "population" not in df.columns:
+                raise NotImplementedError(
+                    f"per1000 transform requires a 'population' column in the DataFrame "
+                    f"(table={table.stats_data_id}, col={table.indicator_col}). "
+                    "Merge population data before calling _apply_transform."
+                )
+            pop = df["population"]
+            df["_raw"] = df["_raw"].where(pop <= 0, df["_raw"] / (pop / 1000.0))
         elif table.transform == "per10k":
-            # 人口 10000人あたりに変換（population 列が別途必要）
-            # TODO: C-3 で人口テーブルを fetch_all に統合し、merge して割り算実装
-            if "population" in df.columns and (df["population"] > 0).any():
-                df["_raw"] = df["_raw"] / (df["population"] / 10000.0)
+            # 人口 10000人あたりに変換（population 列が必要）
+            if "population" not in df.columns:
+                raise NotImplementedError(
+                    f"per10k transform requires a 'population' column in the DataFrame "
+                    f"(table={table.stats_data_id}, col={table.indicator_col}). "
+                    "Merge population data before calling _apply_transform."
+                )
+            pop = df["population"]
+            df["_raw"] = df["_raw"].where(pop <= 0, df["_raw"] / (pop / 10000.0))
         elif table.transform == "shannon":
             # 産業多様性: code × year でグループ化してシャノン指数を計算
             def _shannon_by_group(grp: pd.DataFrame) -> float:
@@ -291,6 +304,9 @@ class EstatCollector:
         return result.sort_values(["code", "year"]).reset_index(drop=True)
 
     def close(self) -> None:
+        # Deactivate the weakref finalizer so close() is not called twice (#17)
+        if hasattr(self, "_finalizer") and self._finalizer.alive:
+            self._finalizer.detach()
         self._client.close()
 
     def __enter__(self) -> "EstatCollector":
